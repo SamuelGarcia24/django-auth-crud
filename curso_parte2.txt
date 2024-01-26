@@ -1,0 +1,288 @@
+super user
+samuel1
+samuelemilio26
+                        
+                        crear formulario mas directo
+
+from django.contrib.auth.forms import UserCreationForm
+
+def helloword(request):
+    return render(request, 'signup.html', {
+        'form': UserCreationForm()
+    })
+
+                        registrar en la base de datos y autenticar
+
+(al autenticar se crea una cookie la cual permite verificar el usuario)
+(User lo que hace es cifrar las contraseñas y todo los necesario)
+
+from django.contrib.auth.models import User
+from django.contrib.auth import login
+    
+def signup(request):
+    if request.method == 'GET':
+        return render(request, 'signup.html', {
+            'form': UserCreationForm()
+        })
+    else:
+        if request.POST['password1'] == request.POST['password2']:
+            try:
+                user = User.objects.create_user(username=request.POST['username'], password=request.POST['password1'])
+                user.save()
+                login(request, user) {´aqui se crea la autenticacion´}
+                return HttpResponse('Usuario creado sactisfactoriamente')
+            except:
+                return HttpResponse('El usuario ya ha sido creado')
+        else:
+            return HttpResponse('La contraseña no coincide')
+
+                        manejo de errores especificos
+
+from django.db import IntegrityError
+
+try:
+    user = User.objects.create_user(username=request.POST['username'], password=request.POST['password1'])
+    user.save()
+    login(request, user)
+    return redirect('tasks')
+except IntegrityError:
+    return render(request, 'signup.html', {
+        'form': UserCreationForm(),
+        'error': 'Este usuario ya existe'
+    })
+
+                        verificar si un usurio esta autentido en el html
+
+from django.contrib.auth import login, logout
+             
+(primero autenticamos el usuario)
+login(request, user)
+(para desautenticar)
+logout(request)
+
+
+{% if user.is_authenticated %}
+<li>
+    <a href='logout/'>Logout</a>
+</li>
+{% else %}
+    <li>
+        <a href='{% url "signup" %}'>Signup</a>
+    </li>
+{% endif %}
+
+
+                        login 
+
+from django.contrib.auth import login, logout, authenticate
+
+(authenticate sirve para verificar si el usuario esta en la base de datos, decifrar todo)
+
+def signin(request):
+    if request.method == 'GET':
+        return render(request, 'signin.html', {
+            'form': AuthenticationForm()
+        })
+    else:
+        user = authenticate(request, username=request.POST['username'], password=request.POST['password'])
+        if user is None: (aca verifica si el usuario existe)
+            return render(request, 'signin.html', {
+            'form': AuthenticationForm(),
+            'error': 'The user or password no is register'
+        })
+        else:
+            login(request, user) (activamos el login)
+            return redirect('tasks')
+
+
+                        añadir que se vea un campo del model solo para lectura (que se vea en el panel de admin)
+
+class TaskAdmin(admin.ModelAdmin):
+    readonly_fields = ("created", )
+
+admin.site.register(Task, TaskAdmin)  
+
+                        crear formulario a partir de un modelo ya creado
+
+(en forms.py)
+class TasksCreate(ModelForm):
+    class Meta:
+        model = Task
+        fields = ['title', 'description', 'important'] (aqui van los campos que queremos que aparezcan)
+
+                        guardar en la bd
+
+try:
+    form = TasksCreate(request.POST)
+    new_task = form.save(commit=False)
+    new_task.user = request.user
+    new_task.save()
+    print(form,new_task)
+    return redirect('tasks')
+except ValueError:
+    return render(request, 'create_tasks.html', {
+    'form': TasksCreate(),
+    'error': 'Please provide valid data'
+})
+
+                        mostrar tareas solo del usuario autenticado
+
+(request.user es un objeto global, en el html se llama como user)
+
+def tasks(request):
+    tareas = Task.objects.filter(user=request.user, dateCompleted__isnull=True)
+    return render(request, 'tasks.html', {
+        'tasks': tareas
+    })
+
+                        obtener tareas especificas
+
+(en urls)
+path('tasks/<int:task_id>', views.task_datail, name='task_detail')
+
+(recibimos el parametro en views y lo obtenemos)
+
+def task_datail(request, task_id):
+    task = get_object_or_404(Task, pk=task_id)
+    return render(request, 'task_detail.html', {
+        'task': task
+    })
+
+(en el html, en tasks agregamos un 'a' y con jinja le pasamos los parametros de la url)
+
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>Tasks</h1>
+<ul>
+    {% for task in tasks %}
+    <li>
+        <a href="{% url 'task_detail' task.id %}">
+            {% if task.important %}
+            <strong>{{task.title}}</strong>
+            {% else %}
+            <p>{{task.title}}</p>
+            {% endif %}
+        </a>
+        <p>{{task.description}}</p>
+        <p>{{task.user.username}}</p>
+    </li>
+    {% endfor %}
+</ul>
+
+{% endblock %}
+
+(creamos un html donde se van a ver los detalles)
+
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>{{task}}</h1>
+{% endblock %}
+
+                        actualizar datos de la tareas
+
+def task_datail(request, task_id):
+    task = get_object_or_404(Task, pk=task_id, user=request.user)
+    if request.method == 'GET':
+        form = TasksCreate(instance=task)
+        return render(request, 'task_detail.html', {
+            'task': task,
+            'form': form
+        })
+    else:
+        try:
+            form = TasksCreate(request.POST, instance=task)
+            form.save()
+            return redirect('tasks')
+        except ValueError:
+            task = get_object_or_404(Task, pk=task_id, user=request.user)
+            form = TasksCreate(instance=task)
+            return render(request, 'task_detail.html', {
+            'task': task,
+            'form': form,
+            'error': 'The camps is requiered'
+        })
+
+
+                    completar o eliminar tareas
+
+(en el html)
+
+<form action="{% url 'complete_task' task.id %}" method="POST">
+    {% csrf_token %}
+    <button>
+        Completed
+    </button>
+</form>
+
+<form action="{% url 'delete_task' task.id %}" method="POST">
+    {% csrf_token %}
+    <button>
+        Deleted
+    </button>
+</form>
+
+(en urls)
+
+path('tasks/<int:task_id>/complete', views.complete_task, name='complete_task'),
+path('tasks/<int:task_id>/delete', views.delete_task, name='delete_task')
+
+(en views)
+
+def complete_task(request, task_id):
+    task = get_object_or_404(Task, pk=task_id, user=request.user)
+    if request.method == 'POST':
+        task.dateCompleted = timezone.now()
+        task.save()
+        return redirect('tasks')    
+    
+def delete_task(request, task_id):
+    task = get_object_or_404(Task, pk=task_id, user=request.user)
+    if request.method == 'POST':
+        task.delete()
+        return redirect('tasks')    
+
+
+
+                        mostrar tareas completadas
+
+(en urls)
+path('tasks_completed/', views.tasks_completed, name='tasks_completed')
+
+(en views, el dateCompleted no es nulo)
+def tasks_completed(request):
+    tareas = Task.objects.filter(user=request.user, dateCompleted__isnull=False)
+    return render(request, 'tasks.html', {
+        'tasks': tareas
+    })
+
+(en tasks.html)
+
+<p>{{task.dateCompleted}}</p>
+
+                        proteger rutas
+
+(en views importamos el decorador)
+
+from django.contrib.auth.decorators import login_required
+
+(lo colocamos en las rutas que queremos proteger)
+
+@login_required    
+def tasks(request):
+    tareas = Task.objects.filter(user=request.user, dateCompleted__isnull=True)
+    return render(request, 'tasks.html', {
+        'tasks': tareas
+    })
+
+(en settings)
+
+STATIC_URL = 'static/'
+LOGIN_URL = '/signin' (ponemos esto para que nos pida iniciar secion al intentar acceder a una de estas rutas)
+
+
+                        desplegar en render.com
+
+(guia de render)
+https://docs.render.com/deploy-django
